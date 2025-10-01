@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+
+    <title>PuppetProtocol-Online</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <button id="refresh-button">🔄</button>
+
+    <div id="user-container">
+
+        <div class="container" id="desktop-axis">
+            <!-- Top Quarter: Inputs and Buttons -->
+            <div id="desktop-axis-top">
+                <input type="text" placeholder="Cmd 1"><button>Send</button>
+                <input type="text" placeholder="Cmd 2"><button>Send</button>
+                <input type="text" placeholder="Cmd 3"><button>Send</button>
+                <input type="text" placeholder="Cmd 4"><button>Send</button>
+                <button id="desktop-axis-stop">STOP</button>
+            </div>
+
+            <!-- Middle Quarter: Sliders -->
+            <div id="desktop-axis-sliders">
+                <div class="slider-group">
+                    <div class="slider-non">Servo 0</div><div class="slider-non" id="axisValue0">90</div><div class="slider-bar" id="bar0"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 1</div><div class="slider-non" id="axisValue1">90</div><div class="slider-bar" id="bar1"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 2</div><div class="slider-non" id="axisValue2">90</div><div class="slider-bar" id="bar2"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 3</div><div class="slider-non" id="axisValue3">90</div><div class="slider-bar" id="bar3"></div>
+                </div>
+            </div>
+
+            <!-- Bottom Half: Buttons -->
+            <div id="desktop-axis-bottom">
+                <button>Read Sonar</button><button>Read Reflectance</button>
+                <button>Read Magnetometer</button><button>Read Accelerometer</button>
+            </div>
+        </div>
+
+        <div class="container" id="interface">
+            <button id="ble-button">🔗</button>
+            <button id="telemetry">no data</button>
+            <button id="ble-status">not connected</button>
+
+            <div id="settings-grid">
+
+                <div class="settings-label help-row">Override axes/buttons</div>
+
+                <div class="settings-toggle help-row">
+                    <div id="toggle-keyboard-style" class="toggle-round"><div class="toggle-nub"></div></div>
+                </div>
+
+                <div class="settings-label help-row">Terminal</div>
+
+                <div class="settings-toggle help-row">
+                    <div id="toggle-terminal" class="toggle-round"><div class="toggle-nub"></div></div>
+                </div>
+
+            </div>
+
+            <a href="https://github.com/AlfredoSystems/PestoLink-Online" target="_blank" id="github-link">Help and Info 🛈</a>
+
+        </div>
+
+        <div class="container desktop-only" id="desktop-button">
+            <!-- Examples of positioning and spanning buttons in the grid -->
+            <!-- grid-column/grid-row format: start-line / end-line or start-line / span number-of-cells -->
+            <button id="buttonDesktop0" style="grid-column: 3; grid-row: 4;">-5cm</button>
+            <button id="buttonDesktop1" style="grid-column: 4; grid-row: 3;">+10°</button>
+            <button id="buttonDesktop2" style="grid-column: 2; grid-row: 3;">-10°</button>
+            <button id="buttonDesktop3" style="grid-column: 3; grid-row: 2;">+5cm</button>
+            <button id="buttonDesktop4" style="grid-column: 2 / span 3; grid-row: 5;">-25cm</button>
+            <button id="buttonDesktop5" style="grid-column: 5; grid-row: 2 / span 3;">+90°</button>
+            <button id="buttonDesktop6" style="grid-column: 1; grid-row: 2 / span 3;">-90°</button>
+            <button id="buttonDesktop7" style="grid-column: 2 / span 3; grid-row: 1;">+25cm</button>
+
+        </div>
+    </div>
+
+    <div id="terminal-container">
+        <button id="terminal-clear-button">🧹</button>
+        <button id="terminal-lock-button">🔓</button>
+        <div id="terminal-log"></div>
+    </div>
+
+    <div id="hack-spacer"></div>
+    <script src="index.js"></script>
+</body>
+
+</html>
