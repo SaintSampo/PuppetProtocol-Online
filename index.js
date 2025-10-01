@@ -9,15 +9,18 @@ let desktopElements = document.getElementsByClassName("desktop-only");
 
 let helpRow = document.getElementsByClassName("help-row");
 
-let terminalElement = document.getElementById("terminal-container");
-let hackSpacerElement = document.getElementById("hack-spacer");
-
 let toggleMobile = document.getElementById('toggle-mobile-layout');
 let toggleKeyboardWASD = document.getElementById('toggle-keyboard-style');
-let toggleTerminal = document.getElementById('toggle-terminal');
+let toggleDebug = document.getElementById('toggle-debug-mode');
 
-// Axis state, initialized to the neutral position (90 degrees -> 127)
-let axisValues = [127, 127, 127, 127];
+// Axis state, initialized to the neutral position (90 degrees)
+let axisValues = [90, 90, 90, 90];
+
+// State for the keyboard override toggle, defaults to off.
+let isKeyboardOverrideEnabled = false;
+
+// State for the debug mode toggle, defaults to off.
+let isDebugModeEnabled = false;
 
 // --------------------------- state management ------------------------------------ //
 
@@ -29,53 +32,34 @@ document.addEventListener('DOMContentLoaded', function () {
     refreshButton.addEventListener('click', reloadPage);
     refreshButton.addEventListener('touchend', reloadPage);
 
-    updateSlider(toggleKeyboardWASD, toggleState=false);
-    updateTerminalSlider(toggleTerminal, toggleState=false);
+    updateToggle(toggleKeyboardWASD, isKeyboardOverrideEnabled, false);
+    updateToggle(toggleDebug, isDebugModeEnabled, false);
 
-    toggleKeyboardWASD.onmousedown = updateSlider.bind(null, toggleKeyboardWASD, toggleState=true)
-    toggleTerminal.onmousedown =     updateTerminalSlider.bind(null, toggleTerminal, toggleState=true)
-    
-    toggleKeyboardWASD.ontouchstart = updateSlider.bind(null, toggleKeyboardWASD, toggleState=true)
-    toggleTerminal.ontouchstart =     updateTerminalSlider.bind(null, toggleTerminal, toggleState=true)
-    
+    const keyboardToggleHandler = () => isKeyboardOverrideEnabled = updateToggle(toggleKeyboardWASD, isKeyboardOverrideEnabled, true);
+    const debugToggleHandler = () => isDebugModeEnabled = updateToggle(toggleDebug, isDebugModeEnabled, true);
+
+    toggleKeyboardWASD.addEventListener('mousedown', keyboardToggleHandler);
+    toggleKeyboardWASD.addEventListener('touchstart', keyboardToggleHandler);
+    toggleDebug.addEventListener('mousedown', debugToggleHandler);
+    toggleDebug.addEventListener('touchstart', debugToggleHandler);
+
     window.setInterval(renderLoop, 100); // call renderLoop every num milliseconds
 
     setupAxisSliders();
+    setupPuppetProtocolButtons();
+    setupDrivetrainButtons();
 });
 
-function updateTerminalSlider(sliderElement, toggleState){
-    updateSlider(sliderElement, toggleState);
-
-    if (localStorage.getItem(toggleTerminal.id) === 'true') {
-        terminalElement.style.display = "grid";
-        hackSpacerElement.style.display = "none";
+function updateToggle(element, currentState, isToggling) {
+    const newState = isToggling ? !currentState : currentState;
+    if (newState) {
+        element.style.backgroundColor = 'var(--alf-green)';
+        element.firstElementChild.style.transform = 'translateX(2vw)';
     } else {
-        terminalElement.style.display = "none";
-        hackSpacerElement.style.display = "grid";
+        element.style.backgroundColor = 'var(--button-default)';
+        element.firstElementChild.style.transform = 'none';
     }
-}
-
-function updateSlider(sliderElement, toggleState){
-    if(toggleState){
-        if ( localStorage.getItem(sliderElement.id) === 'true') {
-            localStorage.setItem(sliderElement.id, 'false');
-        } else {
-            localStorage.setItem(sliderElement.id, 'true');
-        }        
-    }
-
-    if ( localStorage.getItem(sliderElement.id) === 'true') {
-        sliderElement.style.backgroundColor = 'var(--alf-green)';
-        sliderElement.firstElementChild.style.transform = 'translateX(2vw)';
-        sliderElement.firstElementChild.style.webkitTransform  = 'translateX(2vw)';
-        sliderElement.firstElementChild.style.msTransform = 'translateX(2vw)';
-
-    } else {
-        sliderElement.style.backgroundColor = 'rgb(189, 188, 188)';
-        sliderElement.firstElementChild.style.transform = 'none';
-        sliderElement.firstElementChild.style.webkitTransform  = 'none';
-        sliderElement.firstElementChild.style.msTransform = 'none';
-    }
+    return newState;
 }
 
 function setupAxisSliders() {
@@ -98,12 +82,10 @@ function setupAxisSliders() {
             const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
             const percentage = x / rect.width;
 
-            // Map percentage (0-1) to angle (0-180) for display
+            // Map percentage (0-1) to angle (0-180) for display and for the BLE packet
             const angle = Math.round(percentage * 180);
             axisValueDisplay.textContent = angle;
-
-            // Map percentage (0-1) to data value (0-255) for BLE packet
-            axisValues[i] = Math.round(percentage * 255);
+            axisValues[i] = angle;
 
             // Update the visual indicator
             const indicator = sliderBar.querySelector('.slider-indicator');
@@ -113,6 +95,10 @@ function setupAxisSliders() {
         };
 
         const endDrag = () => {
+            // Send packet on drag end
+            const packet = createPuppetPacket(FUNCTION_GROUPS.SERVO, 0x00, FUNCTION_TYPES.SET, [i, axisValues[i]]);
+            bleAgent.attemptSend(packet);
+
             document.removeEventListener('mousemove', onDrag);
             document.removeEventListener('touchmove', onDrag);
             document.removeEventListener('mouseup', endDrag);
@@ -135,35 +121,136 @@ function setupAxisSliders() {
 // ----------------------------------------- main --------------------------------------- //
 
 function renderLoop() {
-    //bytes 0: packet version
-    //bytes 1-4: axes
-    //bytes 5-6: button states
-    //bytes 7-17: pressed keyboard keys
-    let rawPacket = new Uint8Array(1 + 4 + 2 + 11)
+    // The render loop is no longer sending continuous packets.
+    // All packets are now event-driven via the Puppet Protocol.
+    // We can keep this for future features like keyboard overrides.
 
-    rawPacket[0] = 0x01; //packet version
-
-    // Populate axis data from our state
-    rawPacket[1] = clampUint8(axisValues[0]);
-    rawPacket[2] = clampUint8(axisValues[1]);
-    rawPacket[3] = clampUint8(axisValues[2]);
-    rawPacket[4] = clampUint8(axisValues[3]);
-
-    function clampUint8(value) { return Math.max(0, Math.min(value, 255)) }
-
-    if (!document.hasFocus()) { 
-        rawPacket.fill(0, 0, 20);
-        rawPacket[0] = 1;
-        rawPacket[1] = 127;
-        rawPacket[2] = 127;
-        rawPacket[3] = 127;
-        rawPacket[4] = 127;
+    if (!document.hasFocus()) {
+        // If the window loses focus, send a drivetrain stop command for safety.
+        bleAgent.attemptSend(createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET));
     }
-
-    //console.log(rawPacket)
-    bleAgent.attemptSend(rawPacket);
 }
 
+// ----------------------------------------- Puppet Protocol (0x57) --------------------------------------- //
+
+const FUNCTION_GROUPS = {
+    ROBOT_BOARD: 0x03,
+    MOTOR: 0x12,
+    DRIVETRAIN: 0x05,
+    SERVO: 0x13,
+    SENSOR: 0x07,
+};
+
+const FUNCTION_TYPES = {
+    SET: 0x00,
+    REQUEST: 0x01,
+    DATA: 0x02,
+};
+
+/**
+ * Creates a Puppet Protocol (0x57) packet.
+ * @param {number} group - The function group (e.g., FUNCTION_GROUPS.MOTOR).
+ * @param {number} func - The function within the group.
+ * @param {number} type - The function type (e.g., FUNCTION_TYPES.SET).
+ * @param {Array<number|boolean>} data - An array of data to be serialized (bytes, floats, booleans).
+ * @returns {Uint8Array} The constructed packet.
+ */
+function createPuppetPacket(group, func, type, data = []) {
+    const buffer = new ArrayBuffer(20);
+    const view = new DataView(buffer);
+
+    view.setUint8(0, 0x57); // Packet Type
+    view.setUint8(1, group);
+    view.setUint8(2, func);
+    view.setUint8(3, type);
+
+    let offset = 4;
+    data.forEach(value => {
+        if (typeof value === 'number' && Number.isInteger(value)) {
+            // Assume it's a byte if it's an integer
+            view.setUint8(offset, value);
+            offset += 1;
+        } else if (typeof value === 'number') {
+            // Assume it's a float
+            view.setFloat32(offset, value, true); // true for little-endian
+            offset += 4;
+        } else if (typeof value === 'boolean') {
+            view.setUint8(offset, value ? 1 : 0);
+            offset += 1;
+        }
+    });
+
+    return new Uint8Array(buffer);
+}
+
+function setupPuppetProtocolButtons() {
+    const topContainer = document.getElementById('desktop-axis-top');
+    const motorButtons = topContainer.querySelectorAll('button:not(#desktop-axis-stop)');
+    const motorInputs = topContainer.querySelectorAll('input[type="text"]');
+
+    // Motor Set Effort Buttons
+    motorButtons.forEach((button, index) => {
+        button.addEventListener('click', () => {
+            const effort = parseFloat(motorInputs[index].value) || 0.0;
+            const packet = createPuppetPacket(FUNCTION_GROUPS.MOTOR, 0x01, FUNCTION_TYPES.SET, [index, effort]);
+            bleAgent.attemptSend(packet);
+        });
+    });
+
+    // Drivetrain Stop Button
+    document.getElementById('desktop-axis-stop').addEventListener('click', () => {
+        const packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET);
+        bleAgent.attemptSend(packet);
+    });
+
+    const bottomContainer = document.getElementById('desktop-axis-bottom');
+    const sensorButtons = bottomContainer.querySelectorAll('button');
+
+    // Sensor Request Buttons
+    // [Read Sonar, Read Reflectance, Read Magnetometer, Read Accelerometer]
+    const sensorFunctions = [0x00, 0x01, 0x02, 0x03];
+    sensorButtons.forEach((button, index) => {
+        button.addEventListener('click', () => {
+            let data = [];
+            // Reflectance requires a sensor number, let's default to 0 for this example
+            if (sensorFunctions[index] === 0x01) {
+                data.push(0); // Requesting data from reflectance sensor 0
+            }
+            const packet = createPuppetPacket(FUNCTION_GROUPS.SENSOR, sensorFunctions[index], FUNCTION_TYPES.REQUEST, data);
+            bleAgent.attemptSend(packet);
+        });
+    });
+}
+
+function setupDrivetrainButtons() {
+    const container = document.getElementById('desktop-button');
+    const buttons = container.querySelectorAll('button');
+
+    buttons.forEach(button => {
+        button.addEventListener('click', () => {
+            const text = button.innerHTML;
+            const value = parseFloat(text);
+
+            if (isNaN(value)) return;
+
+            let packet;
+            const maxEffort = 0.8; // Default max effort
+            const timeout = 5.0;   // Default timeout in seconds
+
+            if (text.includes('cm')) {
+                // Drivetrain Straight: [0x05][0x04]
+                // Data: (target distance CM, FLOAT)(max effort, FLOAT)(timeout FLOAT)
+                packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x04, FUNCTION_TYPES.SET, [value, maxEffort, timeout]);
+            } else if (text.includes('°')) {
+                // Drivetrain Turn: [0x05][0x05]
+                // Data: (target angle DEG, FLOAT)(max effort, FLOAT)(timeout FLOAT)
+                packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x05, FUNCTION_TYPES.SET, [value, maxEffort, timeout]);
+            }
+
+            if (packet) bleAgent.attemptSend(packet);
+        });
+    });
+}
 // -------------------------------------------- bluetooth --------------------------------------- //
 
 function createBleAgent() {
@@ -175,11 +262,13 @@ function createBleAgent() {
     let terminalLockButton = document.getElementById("terminal-lock-button");
 
 
-    const SERVICE_UUID_UART = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-    const CHARACTERISTIC_UUID_UART_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-    const CHARACTERISTIC_UUID_UART_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-    const CHARACTERISTIC_UUID_DATA_TX = '92ae6088-f24d-4360-b1b1-a432a8ed36ff';
-    const CHARACTERISTIC_UUID_DATA_RX = '92ae6088-f24d-4360-b1b1-a432a8ed36fe';
+    const SERVICE_UUID_UART = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    // The peripheral's TX becomes our RX and vice-versa.
+    const CHARACTERISTIC_UUID_UART_RX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notifications
+    const CHARACTERISTIC_UUID_UART_TX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
+    const CHARACTERISTIC_UUID_DATA_RX = '92ae6088-f24d-4360-b1b1-a432a8ed36fe'; // Notifications
+    const CHARACTERISTIC_UUID_DATA_TX = '92ae6088-f24d-4360-b1b1-a432a8ed36ff'; // Write
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     if (isMobile){
         buttonBLE.ontouchend = updateBLE;
@@ -200,10 +289,10 @@ function createBleAgent() {
     let device = null;
     let server;
     let service;
-    let characteristic_uart_tx;
-    let characteristic_uart_rx;
-
+    let characteristic_data_tx;
+    let characteristic_data_rx;
     let isConnectedBLE = false;
+    let isConnecting = false;
     let bleUpdateInProgress = false;
 
     async function updateBLE() {
@@ -219,33 +308,49 @@ function createBleAgent() {
     }
 
     async function connectBLE() {
-
+        if (isConnecting || isConnectedBLE) return;
+        isConnecting = true;
         try {
             if (device == null){
-                displayBleStatus('Connecting', 'black');
-                device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID_UART] }] });
+                displayBleStatus('Scanning...', 'black');
+                device = await navigator.bluetooth.requestDevice({ 
+                    filters: [{ namePrefix: 'XRP' }],
+                    optionalServices: [SERVICE_UUID_UART] // Grant access to the service
+                });
+                device.addEventListener('gattserverdisconnected', robotDisconnect);
             } else {
                 displayBleStatus(`Reconnecting to <br> ${device.name}`, 'black');
             }
 
-            server = await device.gatt.connect();
+            const connectWithTimeout = (device, timeoutMs) => new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => reject(new Error("Connection timed out")), timeoutMs);
+                device.gatt.connect()
+                    .then(server => { clearTimeout(timeoutId); resolve(server); })
+                    .catch(err => { clearTimeout(timeoutId); reject(err); });
+            });
+
+            server = await connectWithTimeout(device, 10000);
             service = await server.getPrimaryService(SERVICE_UUID_UART);
             
+            // Get Data TX Characteristic for sending packets
+            characteristic_data_tx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_TX);
 
-            characteristic_uart_tx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_TX);
-
-            // Try to get and subscribe to telemetry
+            // Get Data RX Characteristic and subscribe to notifications
             try {
-                characteristic_uart_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_RX);
-                await characteristic_uart_rx.startNotifications();
-                characteristic_uart_rx.addEventListener('characteristicvaluechanged', handleTerminalCharacteristic);
-            } catch {
-                console.log("Terminal characteristic not available.");
+                characteristic_data_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_RX);
+                await characteristic_data_rx.startNotifications();
+                characteristic_data_rx.addEventListener('characteristicvaluechanged', handleTerminalCharacteristic);
+            } catch (error) {
+                console.log("Data RX characteristic not available.", error);
             }
 
-            await device.addEventListener('gattserverdisconnected', robotDisconnect);
+            // Also try to subscribe to the standard UART RX for any other terminal output
+            const characteristic_uart_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_UART_RX);
+            await characteristic_uart_rx.startNotifications();
+            characteristic_uart_rx.addEventListener('characteristicvaluechanged', handleTerminalCharacteristic);
 
             isConnectedBLE = true;
+            isConnecting = false;
             buttonBLE.innerHTML = '❌';
             displayBleStatus(`Connected to <br> ${device.name}`, '#4dae50'); //green
 
@@ -259,6 +364,8 @@ function createBleAgent() {
                 displayBleStatus('Connection failed', '#eb5b5b');
                 connectBLE();
             }
+        } finally {
+            isConnecting = false;
         }
     }
 
@@ -266,37 +373,67 @@ function createBleAgent() {
 
     function handleTerminalCharacteristic(event){
 
-        if(terminalLocked) return;
+        if (terminalLocked) return;
 
-        const value = event.target.value; // DataView of the characteristic's value
+        const view = event.target.value; // DataView of the characteristic's value
 
-        let controlCharacter = value.getUint8(0);
-        let asciiString = '';
-
-        for (let i = 0; i < Math.min(64, value.byteLength-1); i++) {
-            asciiString += String.fromCharCode(value.getUint8(i+1));
+        if (isDebugModeEnabled) {
+            const byteArray = new Uint8Array(view.buffer);
+            const hexString = Array.from(byteArray).map(b => b.toString(16).padStart(2, '0')).join(' ').toUpperCase();
+            appendToTerminal(`IN: [ ${hexString} ]`);
         }
 
-        if (controlCharacter == 1) {
-            // Get current lines
-            const lines = terminalLog.innerHTML.split('<br>').filter(line => line !== '');
+        const packetType = view.getUint8(0);
+        let outputString = '';
 
-            // Add new line
-            lines.push(asciiString);
+        if (packetType === 0x57) { // Puppet Protocol Data
+            const group = view.getUint8(1);
+            const func = view.getUint8(2);
+            const type = view.getUint8(3);
 
-            // Keep only the last 7 lines
-            while (lines.length > 7) {
-                lines.shift(); // Remove the oldest line
+            if (type === FUNCTION_TYPES.DATA) {
+                outputString = `DATA: `;
+                if (group === FUNCTION_GROUPS.SENSOR && func === 0x00) { // Sonar
+                    const distance = view.getFloat32(4, true).toFixed(2);
+                    outputString += `Sonar Distance: ${distance} cm`;
+                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x01) { // Reflectance
+                    const sensorNum = view.getUint8(4); const value = view.getFloat32(5, true).toFixed(2);
+                    outputString += `Reflectance[${sensorNum}]: ${value}`; 
+                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x02) { // Magnetometer
+                    const yaw = view.getFloat32(4, true).toFixed(2); const roll = view.getFloat32(8, true).toFixed(2); const pitch = view.getFloat32(12, true).toFixed(2);
+                    outputString += `Mag: Y=${yaw}, R=${roll}, P=${pitch}`; 
+                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x03) { // Accelerometer
+                    const x = view.getFloat32(4, true).toFixed(2); const y = view.getFloat32(8, true).toFixed(2); const z = view.getFloat32(12, true).toFixed(2);
+                    outputString += `Accel: X=${x}, Y=${y}, Z=${z}`; 
+                } else {
+                    // Generic data packet display
+                    outputString = `PUPPET(0x57): G=${group}, F=${func}, Data=[`;
+                    for (let i = 4; i < view.byteLength; i++) { outputString += ` ${view.getUint8(i)}`; }
+                    outputString += " ]";
+                }
             }
-
-            // Re-render terminal
-            terminalLog.innerHTML = lines.join('<br>');
+        } else { // Legacy Terminal Data
+            let controlCharacter = view.getUint8(0);
+            let asciiString = '';
+            for (let i = 1; i < view.byteLength; i++) { asciiString += String.fromCharCode(view.getUint8(i)); }
+            if (controlCharacter === 1) {
+                outputString = asciiString;
+            } else if (controlCharacter === 2) {
+                terminalLog.innerHTML = "";
+                return;
+            }
         }
 
-        if(controlCharacter == 2){
-            terminalLog.innerHTML = "";
+        if (outputString) {
+            appendToTerminal(outputString);
         }
+    }
 
+    function appendToTerminal(text) {
+        const lines = terminalLog.innerHTML.split('<br>').filter(line => line.trim() !== '');
+        lines.push(text);
+        while (lines.length > 7) lines.shift();
+        terminalLog.innerHTML = lines.join('<br>');
     }
 
     function clearTerminal() {
@@ -316,13 +453,12 @@ function createBleAgent() {
     async function disconnectBLE() {
         displayBleStatus('Disconnecting', 'gray');
         try {
-            await device.removeEventListener('gattserverdisconnected', robotDisconnect);
-            await device.gatt.disconnect();
-
+            if (device && device.gatt.connected) {
+                await device.gatt.disconnect();
+            }
             displayBleStatus('Not Connected', 'black');
             isConnectedBLE = false;
             buttonBLE.innerHTML = '🔗';
-
 
         } catch (error) {
             displayBleStatus("Error", '#eb5b5b');
@@ -332,18 +468,40 @@ function createBleAgent() {
 
     function robotDisconnect(event) {
         displayBleStatus('Not Connected', 'black');
-        isConnectedBLE = false;
-        connectBLE();
+        if (isConnectedBLE) {
+            isConnectedBLE = false;
+            // Optional: try to reconnect automatically
+            // displayBleStatus('Reconnecting...', 'black');
+            // setTimeout(connectBLE, 1000); 
+        }
     }
 
-    async function sendPacketBLE(byteArray) {
-        if (!isConnectedBLE) return;
+    /**
+     *  bleQueue - If we haven't come back from the ble.writeValue then the GATT is still busy and we will miss items that are being sent
+     * This can be seen if you type very fast in the Shell 
+     */
+    let bleWriteQueue = Promise.resolve();
 
-        try {
-            await characteristic_uart_tx.writeValueWithoutResponse(new Uint8Array(byteArray));
-        } catch (error) {
-            console.error('Error:', error);
+    async function sendPacketBLE(byteArray) {
+        if (!isConnectedBLE || !characteristic_data_tx) {
+            return;
         }
+
+        if (isDebugModeEnabled) {
+            // Create a hex string representation of the outgoing packet
+            const hexString = Array.from(new Uint8Array(byteArray)).map(b => b.toString(16).padStart(2, '0')).join(' ').toUpperCase();
+            appendToTerminal(`OUT: [ ${hexString} ]`);
+        }
+
+        bleWriteQueue = bleWriteQueue.then(async () => {
+            try {
+                // Using writeValueWithResponse is more reliable for NUS, but writeValueWithoutResponse is faster.
+                // Your Python code uses NOTIFY, so the client should use writeValueWithoutResponse.
+                await characteristic_data_tx.writeValueWithoutResponse(new Uint8Array(byteArray));
+            } catch (error) {
+                console.error('BLE write failed:', error);
+            }
+        });
     }
 
     return {

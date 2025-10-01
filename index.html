@@ -21,10 +21,10 @@
         <div class="container" id="desktop-axis">
             <!-- Top Quarter: Inputs and Buttons -->
             <div id="desktop-axis-top">
-                <input type="text" placeholder="Cmd 1"><button>Send</button>
-                <input type="text" placeholder="Cmd 2"><button>Send</button>
-                <input type="text" placeholder="Cmd 3"><button>Send</button>
-                <input type="text" placeholder="Cmd 4"><button>Send</button>
+                <button>Set Motor L</button><input type="text" placeholder="0.0">
+                <button>Set Motor R</button><input type="text" placeholder="0.0">
+                <button>Set Motor 3</button><input type="text" placeholder="0.0">
+                <button>Set Motor 4</button><input type="text" placeholder="0.0">
                 <button id="desktop-axis-stop">STOP</button>
             </div>
 
@@ -64,10 +64,10 @@
                     <div id="toggle-keyboard-style" class="toggle-round"><div class="toggle-nub"></div></div>
                 </div>
 
-                <div class="settings-label help-row">Terminal</div>
+                <div class="settings-label help-row">Debug Mode</div>
 
                 <div class="settings-toggle help-row">
-                    <div id="toggle-terminal" class="toggle-round"><div class="toggle-nub"></div></div>
+                    <div id="toggle-debug-mode" class="toggle-round"><div class="toggle-nub"></div></div>
                 </div>
 
             </div>
@@ -79,14 +79,14 @@
         <div class="container desktop-only" id="desktop-button">
             <!-- Examples of positioning and spanning buttons in the grid -->
             <!-- grid-column/grid-row format: start-line / end-line or start-line / span number-of-cells -->
-            <button id="buttonDesktop0" style="grid-column: 3; grid-row: 4;">-5cm</button>
-            <button id="buttonDesktop1" style="grid-column: 4; grid-row: 3;">+10°</button>
-            <button id="buttonDesktop2" style="grid-column: 2; grid-row: 3;">-10°</button>
-            <button id="buttonDesktop3" style="grid-column: 3; grid-row: 2;">+5cm</button>
-            <button id="buttonDesktop4" style="grid-column: 2 / span 3; grid-row: 5;">-25cm</button>
-            <button id="buttonDesktop5" style="grid-column: 5; grid-row: 2 / span 3;">+90°</button>
-            <button id="buttonDesktop6" style="grid-column: 1; grid-row: 2 / span 3;">-90°</button>
-            <button id="buttonDesktop7" style="grid-column: 2 / span 3; grid-row: 1;">+25cm</button>
+            <button style="grid-column: 3; grid-row: 4;">-5cm</button>
+            <button style="grid-column: 4; grid-row: 3;">+10°</button>
+            <button style="grid-column: 2; grid-row: 3;">-10°</button>
+            <button style="grid-column: 3; grid-row: 2;">+5cm</button>
+            <button style="grid-column: 2 / span 3; grid-row: 5;">-25cm</button>
+            <button style="grid-column: 5; grid-row: 2 / span 3;">+90°</button>
+            <button style="grid-column: 1; grid-row: 2 / span 3;">-90°</button>
+            <button style="grid-column: 2 / span 3; grid-row: 1;">+25cm</button>
 
         </div>
     </div>
@@ -97,7 +97,6 @@
         <div id="terminal-log"></div>
     </div>
 
-    <div id="hack-spacer"></div>
     <script src="index.js"></script>
 </body>
 
