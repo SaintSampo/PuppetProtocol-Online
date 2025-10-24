@@ -1,23 +1,6 @@
-let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-
 let bleAgent = createBleAgent();
 
-let axisCallback = null
-let buttonCallback = null
-
-let desktopElements = document.getElementsByClassName("desktop-only");
-
-let helpRow = document.getElementsByClassName("help-row");
-
-let toggleMobile = document.getElementById('toggle-mobile-layout');
-let toggleKeyboardWASD = document.getElementById('toggle-keyboard-style');
 let toggleDebug = document.getElementById('toggle-debug-mode');
-
-// Axis state, initialized to the neutral position (90 degrees)
-let axisValues = [90, 90, 90, 90];
-
-// State for the keyboard override toggle, defaults to off.
-let isKeyboardOverrideEnabled = false;
 
 // State for the debug mode toggle, defaults to off.
 let isDebugModeEnabled = false;
@@ -32,18 +15,19 @@ document.addEventListener('DOMContentLoaded', function () {
     refreshButton.addEventListener('click', reloadPage);
     refreshButton.addEventListener('touchend', reloadPage);
 
-    updateToggle(toggleKeyboardWASD, isKeyboardOverrideEnabled, false);
     updateToggle(toggleDebug, isDebugModeEnabled, false);
 
-    const keyboardToggleHandler = () => isKeyboardOverrideEnabled = updateToggle(toggleKeyboardWASD, isKeyboardOverrideEnabled, true);
     const debugToggleHandler = () => isDebugModeEnabled = updateToggle(toggleDebug, isDebugModeEnabled, true);
 
-    toggleKeyboardWASD.addEventListener('mousedown', keyboardToggleHandler);
-    toggleKeyboardWASD.addEventListener('touchstart', keyboardToggleHandler);
     toggleDebug.addEventListener('mousedown', debugToggleHandler);
     toggleDebug.addEventListener('touchstart', debugToggleHandler);
 
-    window.setInterval(renderLoop, 100); // call renderLoop every num milliseconds
+    // If the window loses focus, send a drivetrain stop command for safety.
+    window.addEventListener('blur', () => {
+        if (bleAgent.isConnected()) {
+            bleAgent.attemptSend(createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET));
+        }
+    });
 
     setupAxisSliders();
     setupPuppetProtocolButtons();
@@ -63,6 +47,9 @@ function updateToggle(element, currentState, isToggling) {
 }
 
 function setupAxisSliders() {
+    // Axis state, initialized to the neutral position (90 degrees)
+    const axisValues = [90, 90, 90, 90];
+
     for (let i = 0; i < 4; i++) {
         const sliderBar = document.getElementById(`bar${i}`);
         const axisValueDisplay = document.getElementById(`axisValue${i}`);
@@ -119,17 +106,6 @@ function setupAxisSliders() {
 }
 
 // ----------------------------------------- main --------------------------------------- //
-
-function renderLoop() {
-    // The render loop is no longer sending continuous packets.
-    // All packets are now event-driven via the Puppet Protocol.
-    // We can keep this for future features like keyboard overrides.
-
-    if (!document.hasFocus()) {
-        // If the window loses focus, send a drivetrain stop command for safety.
-        bleAgent.attemptSend(createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET));
-    }
-}
 
 // ----------------------------------------- Puppet Protocol (0x57) --------------------------------------- //
 
@@ -264,8 +240,6 @@ function createBleAgent() {
 
     const SERVICE_UUID_UART = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
     // The peripheral's TX becomes our RX and vice-versa.
-    const CHARACTERISTIC_UUID_UART_RX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notifications
-    const CHARACTERISTIC_UUID_UART_TX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
     const CHARACTERISTIC_UUID_DATA_RX = '92ae6088-f24d-4360-b1b1-a432a8ed36fe'; // Notifications
     const CHARACTERISTIC_UUID_DATA_TX = '92ae6088-f24d-4360-b1b1-a432a8ed36ff'; // Write
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -294,6 +268,7 @@ function createBleAgent() {
     let isConnectedBLE = false;
     let isConnecting = false;
     let bleUpdateInProgress = false;
+    let characteristicsSubscribed = false;
 
     async function updateBLE() {
         if (bleUpdateInProgress) return
@@ -322,14 +297,7 @@ function createBleAgent() {
                 displayBleStatus(`Reconnecting to <br> ${device.name}`, 'black');
             }
 
-            const connectWithTimeout = (device, timeoutMs) => new Promise((resolve, reject) => {
-                const timeoutId = setTimeout(() => reject(new Error("Connection timed out")), timeoutMs);
-                device.gatt.connect()
-                    .then(server => { clearTimeout(timeoutId); resolve(server); })
-                    .catch(err => { clearTimeout(timeoutId); reject(err); });
-            });
-
-            server = await connectWithTimeout(device, 10000);
+            server = await device.gatt.connect();
             service = await server.getPrimaryService(SERVICE_UUID_UART);
             
             // Get Data TX Characteristic for sending packets
@@ -339,15 +307,12 @@ function createBleAgent() {
             try {
                 characteristic_data_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_RX);
                 await characteristic_data_rx.startNotifications();
-                characteristic_data_rx.addEventListener('characteristicvaluechanged', handleTerminalCharacteristic);
+                characteristic_data_rx.addEventListener('characteristicvaluechanged', handleIncomingData);
             } catch (error) {
                 console.log("Data RX characteristic not available.", error);
             }
 
-            // Also try to subscribe to the standard UART RX for any other terminal output
-            const characteristic_uart_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_UART_RX);
-            await characteristic_uart_rx.startNotifications();
-            characteristic_uart_rx.addEventListener('characteristicvaluechanged', handleTerminalCharacteristic);
+            characteristicsSubscribed = true;
 
             isConnectedBLE = true;
             isConnecting = false;
@@ -362,7 +327,6 @@ function createBleAgent() {
             } else {
                 console.log( error);
                 displayBleStatus('Connection failed', '#eb5b5b');
-                connectBLE();
             }
         } finally {
             isConnecting = false;
@@ -371,7 +335,7 @@ function createBleAgent() {
 
     let terminalLocked = false;
 
-    function handleTerminalCharacteristic(event){
+    function handleIncomingData(event){
 
         if (terminalLocked) return;
 
@@ -407,20 +371,10 @@ function createBleAgent() {
                     outputString += `Accel: X=${x}, Y=${y}, Z=${z}`; 
                 } else {
                     // Generic data packet display
-                    outputString = `PUPPET(0x57): G=${group}, F=${func}, Data=[`;
+                    outputString = `DATA: G=${group}, F=${func}, Data=[`;
                     for (let i = 4; i < view.byteLength; i++) { outputString += ` ${view.getUint8(i)}`; }
                     outputString += " ]";
                 }
-            }
-        } else { // Legacy Terminal Data
-            let controlCharacter = view.getUint8(0);
-            let asciiString = '';
-            for (let i = 1; i < view.byteLength; i++) { asciiString += String.fromCharCode(view.getUint8(i)); }
-            if (controlCharacter === 1) {
-                outputString = asciiString;
-            } else if (controlCharacter === 2) {
-                terminalLog.innerHTML = "";
-                return;
             }
         }
 
@@ -453,11 +407,20 @@ function createBleAgent() {
     async function disconnectBLE() {
         displayBleStatus('Disconnecting', 'gray');
         try {
+            if (characteristicsSubscribed && characteristic_data_rx) {
+                try {
+                    await characteristic_data_rx.stopNotifications();
+                    characteristic_data_rx.removeEventListener('characteristicvaluechanged', handleIncomingData);
+                } catch (e) {
+                    console.log("Error unsubscribing from notifications:", e);
+                }
+            }
             if (device && device.gatt.connected) {
                 await device.gatt.disconnect();
             }
             displayBleStatus('Not Connected', 'black');
             isConnectedBLE = false;
+            characteristicsSubscribed = false;
             buttonBLE.innerHTML = '🔗';
 
         } catch (error) {
@@ -505,6 +468,7 @@ function createBleAgent() {
     }
 
     return {
-        attemptSend: sendPacketBLE
+        attemptSend: sendPacketBLE,
+        isConnected: () => isConnectedBLE
     };
 }

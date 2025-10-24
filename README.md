@@ -5,6 +5,12 @@
 
 Special thanks to @benPark20 for console code!
 
+## Useful Links
+-https://github.com/Open-STEM/XRPCode/blob/main/lib/XRPLib/gamepad.py
+-https://github.com/Open-STEM/XRPCode/blob/main/js/repl.js
+-https://github.com/wpilibsuite/allwpilib/tree/main/simulation/halsim_xrp
+-https://github.com/David-Fuq/Cornell-ISS-Mimic-Mini
+
 ## Embedded Platform Support
 
 [PestoLink](https://github.com/AlfredoSystems/PestoLink-MicroPython) currently supports two embedded platforms: **MicroPython** and **Arduino**.
@@ -31,18 +37,6 @@ PestoLink is only designed for certain web browsers. PestoLink works with **Goog
 
 Note for iOS: 
 - Very few iOS browsers support Web Bluetooth. While Google Chrome has worked for some users, the best option found so far is [Bluefy](https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055).
-
----
-
-## What does "Override axes/buttons with keyboard" do?
-
-By default, keyboard data is sent separately from axis/button data.
-
-If your robot was programmed to be driven with gamepad or mobile input, but you don’t have either on hand, you can enable this switch to override axis/button data using the keyboard.
-
-- `W`, `A`, `S`, `D` override **Axis 0** and **Axis 1**
-- `I`, `J`, `K`, `L` override **Axis 2** and **Axis 3**
-- `Z`, `X`, `C`, `V`, `B`, `N`, `M`, `,` override **Buttons 0–7**
 
 ---
 
