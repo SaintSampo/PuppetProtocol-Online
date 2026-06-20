@@ -8,70 +8,77 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 
-    <title>PuppetProtocol-Online</title>
+    <title>PuppetPassthrough</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
 
-    <button id="refresh-button">🔄</button>
-
     <div id="user-container">
 
         <div class="container" id="desktop-axis">
-            <!-- Top Quarter: Inputs and Buttons -->
+            <!-- Top: STOP and LED -->
             <div id="desktop-axis-top">
-                <button>Set Motor L</button><input type="text" placeholder="0.0">
-                <button>Set Motor R</button><input type="text" placeholder="0.0">
-                <button>Set Motor 3</button><input type="text" placeholder="0.0">
-                <button>Set Motor 4</button><input type="text" placeholder="0.0">
                 <button id="desktop-axis-stop">STOP</button>
+                <button id="led-button">LED OFF</button>
             </div>
 
-            <!-- Middle Quarter: Sliders -->
+            <!-- All sliders: Motors (-1 to 1) top rows, Servos (0-180) bottom rows -->
             <div id="desktop-axis-sliders">
                 <div class="slider-group">
-                    <div class="slider-non">Servo 0</div><div class="slider-non" id="axisValue0">90</div><div class="slider-bar" id="bar0"></div>
+                    <div class="slider-non">Motor L</div><div class="slider-non" id="motorValue0">0.00</div><div class="slider-bar motor-slider-bar" id="mbar0"></div>
                 </div>
                 <div class="slider-group">
-                    <div class="slider-non">Servo 1</div><div class="slider-non" id="axisValue1">90</div><div class="slider-bar" id="bar1"></div>
+                    <div class="slider-non">Motor R</div><div class="slider-non" id="motorValue1">0.00</div><div class="slider-bar motor-slider-bar" id="mbar1"></div>
                 </div>
                 <div class="slider-group">
-                    <div class="slider-non">Servo 2</div><div class="slider-non" id="axisValue2">90</div><div class="slider-bar" id="bar2"></div>
+                    <div class="slider-non">Motor 3</div><div class="slider-non" id="motorValue2">0.00</div><div class="slider-bar motor-slider-bar" id="mbar2"></div>
                 </div>
                 <div class="slider-group">
-                    <div class="slider-non">Servo 3</div><div class="slider-non" id="axisValue3">90</div><div class="slider-bar" id="bar3"></div>
+                    <div class="slider-non">Motor 4</div><div class="slider-non" id="motorValue3">0.00</div><div class="slider-bar motor-slider-bar" id="mbar3"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 1</div><div class="slider-non" id="axisValue0">90</div><div class="slider-bar" id="bar0"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 2</div><div class="slider-non" id="axisValue1">90</div><div class="slider-bar" id="bar1"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 3</div><div class="slider-non" id="axisValue2">90</div><div class="slider-bar" id="bar2"></div>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-non">Servo 4</div><div class="slider-non" id="axisValue3">90</div><div class="slider-bar" id="bar3"></div>
                 </div>
             </div>
 
-            <!-- Bottom Half: Buttons -->
+            <!-- Live telemetry (streamed from robot via XPP) -->
             <div id="desktop-axis-bottom">
-                <button>Read Sonar</button><button>Read Reflectance</button>
-                <button>Read Magnetometer</button><button>Read Accelerometer</button>
+                <span class="t-label">Sonar</span>   <span class="t-value" id="telemetry-sonar">—</span>
+                <span class="t-label">Voltage</span> <span class="t-value" id="telemetry-voltage">—</span>
+                <span class="t-label">Refl L</span>  <span class="t-value" id="telemetry-refl-left">—</span>
+                <span class="t-label">Refl R</span>  <span class="t-value" id="telemetry-refl-right">—</span>
+                <span class="t-label">Yaw</span>     <span class="t-value" id="telemetry-imu-yaw">—</span>
+                <span class="t-label">Roll</span>    <span class="t-value" id="telemetry-imu-roll">—</span>
+                <span class="t-label">Pitch</span>   <span class="t-value" id="telemetry-imu-pitch">—</span>
+                <span class="t-label">Ax</span>      <span class="t-value" id="telemetry-acc-x">—</span>
+                <span class="t-label">Ay</span>      <span class="t-value" id="telemetry-acc-y">—</span>
+                <span class="t-label">Az</span>      <span class="t-value" id="telemetry-acc-z">—</span>
+                <span class="t-label">Enc 0</span>   <span class="t-value" id="telemetry-enc-0">—</span>
+                <span class="t-label">Enc 1</span>   <span class="t-value" id="telemetry-enc-1">—</span>
+                <span class="t-label">Enc 2</span>   <span class="t-value" id="telemetry-enc-2">—</span>
+                <span class="t-label">Enc 3</span>   <span class="t-value" id="telemetry-enc-3">—</span>
+                <span class="t-label">Button</span>  <span class="t-value" id="telemetry-button">—</span>
+                <span class="t-label">Board</span>   <span class="t-value" id="telemetry-board-type">—</span>
             </div>
         </div>
 
         <div class="container" id="interface">
             <button id="ble-button">🔗</button>
-            <button id="telemetry">no data</button>
+            <button id="telemetry">— V</button>
             <button id="ble-status">not connected</button>
-
-            <div id="settings-grid">
-
-                <div class="settings-label help-row">Debug Mode</div>
-
-                <div class="settings-toggle help-row">
-                    <div id="toggle-debug-mode" class="toggle-round"><div class="toggle-nub"></div></div>
-                </div>
-
-            </div>
-
-            <a href="https://github.com/AlfredoSystems/PestoLink-Online" target="_blank" id="github-link">Help and Info 🛈</a>
-
         </div>
 
         <div class="container desktop-only" id="desktop-button">
-            <!-- Examples of positioning and spanning buttons in the grid -->
             <!-- grid-column/grid-row format: start-line / end-line or start-line / span number-of-cells -->
             <button style="grid-column: 3; grid-row: 4;">-5cm</button>
             <button style="grid-column: 4; grid-row: 3;">+10°</button>
@@ -81,14 +88,7 @@
             <button style="grid-column: 5; grid-row: 2 / span 3;">+90°</button>
             <button style="grid-column: 1; grid-row: 2 / span 3;">-90°</button>
             <button style="grid-column: 2 / span 3; grid-row: 1;">+25cm</button>
-
         </div>
-    </div>
-
-    <div id="terminal-container">
-        <button id="terminal-clear-button">🧹</button>
-        <button id="terminal-lock-button">🔓</button>
-        <div id="terminal-log"></div>
     </div>
 
     <script src="index.js"></script>

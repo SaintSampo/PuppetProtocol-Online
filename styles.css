@@ -47,60 +47,6 @@ body {
     border-radius: 2vw;
 }
 
-#terminal-container {
-    box-sizing: border-box;
-    position: relative;
-    background: black;
-    width: 84vw;
-    height: 14vw;
-    margin: 1vw;
-    padding: 1.3vw;
-    padding-left: 2vw;
-    border-radius: 2vw;
-}
-
-#terminal-clear-button{
-    top: 1vw;
-    right: 1vw;
-}
-
-#terminal-lock-button{
-    top: 1vw;
-    right: 7vw;
-}
-
-#terminal-container button {
-    position: absolute;
-    background-color: var(--button-default);
-    border-radius: 1vw;
-    font-size: 3vw;
-    width: 5vw;
-    height: 5vw;
-    cursor: pointer;
-    border: none;
-    color: #e6e5e5;
-    text-align: center;
-    transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-#terminal-container button:hover {
-    background-color: #FFFFFF;
-}
-#terminal-container button:active {
-    background-color: rgb(159, 159, 159);
-    transform: translateY(2px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-#terminal-log{
-    overflow: hidden;
-    font-weight: normal;
-    font-family: monospace;
-    font-size: 1.4vw;
-    display: flex;
-    flex-direction: column-reverse; 
-}
-
 #user-container {
     box-sizing: border-box;
     display: flex;
@@ -131,7 +77,7 @@ body {
     width: 22vw;
     height: 30vw;
     display: grid;
-    grid-template-rows: 1fr 1fr 2fr 1fr;
+    grid-template-rows: 1fr 2fr;
     grid-template-columns: 1fr 1fr;
     grid-gap: 1vw;
     padding: 1vw;
@@ -146,7 +92,9 @@ body {
     cursor: pointer;
     border: none;
     color: #e6e5e5;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
@@ -162,46 +110,29 @@ body {
 #telemetry {
     background-color: grey;
     color: white;
-    overflow: hidden;
     border-radius: 1vw;
-    width: 12vw;
     font-size: 2vw;
     grid-row: 1;
     grid-column: 2;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 #ble-status {
     background-color: black;
-    font-size: 2vw;
-    height: 6vw;
-    grid-row: 2;
-    grid-column: 1;
-    grid-column: span 2;
-}
-
-#github-link {
-    background-color: var(--button-default);
+    font-size: 2.5vw;
     border-radius: 1vw;
-    font-size: 2vw;
+    grid-row: 2;
     grid-column: span 2;
-    cursor: pointer;
-    border: none;
-    color: #e6e5e5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
-    transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    text-shadow: -1.5px -1.5px 1px #303030, 1.5px -1.5px 1px #303030, -1.5px 1.5px 1px #303030, 1.5px 1.5px 1px #303030;
-    text-decoration: none;
+    line-height: 1.4;
+}
 
-}
-#github-link:hover {
-    background-color: var(--button-hover);
-}
-#github-link:active {
-    background-color: rgb(159, 159, 159);
-    transform: translateY(2px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
 
 #desktop-button {
     display: grid;
@@ -236,74 +167,84 @@ body {
     display: grid;
     padding: 1vw;
     grid-gap: 0.5vw;
-    grid-template-rows: 1fr 1fr 2fr; /* Top quarter, middle quarter, bottom half */
+    grid-template-rows: minmax(0, 0.7fr) minmax(0, 2.3fr) minmax(0, 2fr);
     grid-template-columns: 1fr;
+    overflow: hidden;
+}
+
+.motor-slider-bar {
+    background: linear-gradient(to right,
+        rgb(141, 168, 204) calc(50% - 1px),
+        rgba(255,255,255,0.5) calc(50% - 1px),
+        rgba(255,255,255,0.5) calc(50% + 1px),
+        rgb(141, 168, 204) calc(50% + 1px)
+    );
 }
 
 #desktop-axis-top {
     display: grid;
-    grid-template-columns: 2fr 2fr 2fr;
-    grid-template-rows: repeat(4, 1fr);
-    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
     gap: 0.5vw;
-    position: relative;
-}
-
-#desktop-axis-top input[type="text"] {
-    background-color: #f0f0f0;
-    color: #333;
-    font-weight: normal;
-    border-radius: 0.5vw;
-    padding-left: 0.5vw;
-    font-size: 1vw;
-    height: 100%;
-}
-
-#desktop-axis-top button {
-    font-size: 0.9vw;
-    background-color: var(--button-default);
-    border: none;
-    border-radius: 0.5vw;
-    cursor: pointer;
-    color: #e6e5e5;
-    transition: background-color 0.3s;
-}
-
-#desktop-axis-top button:hover {
-    background-color: var(--button-hover);
+    min-height: 0;
+    overflow: hidden;
 }
 
 #desktop-axis-stop {
-    grid-row: 1 / span 4;
-    grid-column: 3;
-    font-size: 1.5vw !important;
-    background-color: #c0392b !important;
-    border-radius: 2vw;
+    font-size: 2vw;
+    background-color: #c0392b;
+    border-radius: 1vw;
+    cursor: pointer;
+    color: #e6e5e5;
+    border: none;
+    transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+#desktop-axis-stop:hover { background-color: #e74c3c; }
+#desktop-axis-stop:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2);
 }
 
-#desktop-axis-stop:hover {
-    background-color: #e74c3c !important;
+#led-button {
+    font-size: 2vw;
+    background-color: var(--button-default);
+    border-radius: 1vw;
+    cursor: pointer;
+    color: #e6e5e5;
+    border: none;
+    transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+#led-button:hover { background-color: var(--button-hover); }
+#led-button:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
 }
 
 #desktop-axis-sliders {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
     gap: 0.5vw;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .slider-group {
     display: grid;
     grid-template-columns: 2fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 0.2vw;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.15vw;
     background-color: #3a3a3a;
-    border-radius: 1vw;
-    padding: 0.3vw;
+    border-radius: 0.7vw;
+    padding: 0.2vw 0.3vw;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .slider-group .slider-non {
-    font-size: 1vw;
+    font-size: 0.9vw;
 }
 
 .slider-group .slider-bar {
@@ -313,30 +254,33 @@ body {
 
 #desktop-axis-bottom {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 0.5vw;
+    grid-template-columns: auto 1fr auto 1fr;
+    gap: 0.15vw 0.4vw;
+    padding: 0.3vw 0.5vw;
+    align-content: start;
+    min-height: 0;
+    overflow: hidden;
 }
 
-#desktop-axis-bottom button {
-    font-size: 1.8vw;
-    background-color: var(--button-default);
-    border: none;
-    border-radius: 1vw;
-    cursor: pointer;
-    color: #e6e5e5;
-    transition: background-color 0.3s, transform 0.1s;
+.t-label {
+    font-size: 1vw;
+    font-weight: normal;
+    color: #aaaaaa;
+    text-align: right;
+    white-space: nowrap;
+    align-self: center;
 }
 
-#desktop-axis-bottom button:hover {
-    background-color: var(--button-hover);
-}
-#desktop-axis-bottom button:active {
-    transform: translateY(2px);
+.t-value {
+    font-size: 1vw;
+    font-family: monospace;
+    color: white;
+    font-weight: bold;
+    align-self: center;
 }
 
 #desktop-axis div {
-    font-size: 2vw;
+    font-size: 1vw;
     border: none;
 }
 
@@ -358,79 +302,4 @@ body {
     background-color: white;
     border-radius: 0.5vw;
     transform: translateX(-50%);
-}
-
-#settings-grid {
-    display: grid;
-    height: 10vw;
-    padding: 0.5vw;
-    grid-column-gap: 0.5vw;
-    grid-template-columns: 2fr 1fr;
-    grid-column: span 2;
-    background-color: grey;
-    border-radius: 1vw;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-}
-
-.settings-label {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    font-size: 1.2vw;
-}
-
-.settings-toggle {
-    position: relative;
-    display: inline-block;
-    width: 5vw;
-    height: 3vw;
-    touch-action: manipulation; 
-}
-
-.toggle-round {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--button-default);
-    border-radius: 3vw;
-}
-
-.toggle-nub {
-    position: absolute;
-    content: "";
-    height: 2vw;
-    width: 2vw;
-    left: 0.5vw;
-    bottom: 0.5vw;
-    background-color: white;
-    border-radius: 50%;
-}
-
-#refresh-button {
-    position: absolute;
-    top: 1vw;
-    left: 1vw;
-    width: 5vw;
-    height: 5vw;
-    font-size: 3vw;
-    background-color: var(--button-default);
-    border-radius: 1vw;
-    cursor: pointer;
-    border: none;
-    color: #e6e5e5;
-    text-align: center;
-    transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-#refresh-button:hover {
-    background-color: var(--button-hover);
-}
-#refresh-button:active {
-    transform: translateY(2px);
 }

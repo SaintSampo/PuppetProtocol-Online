@@ -1,474 +1,539 @@
+// ============================================================
+// XPP Protocol — must match puppet.py on the robot
+// ============================================================
+
+const DEBUG = true;  // Set false to silence console debug output
+function dbg(...args) { if (DEBUG) console.log('[XPP]', ...args); }
+function hex(bytes) { return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join(' '); }
+
+const XPP_START_1 = 0xAA;
+const XPP_START_2 = 0x55;
+const XPP_END_1   = 0x55;
+const XPP_END_2   = 0xAA;
+
+const MSG_TYPE_VAR_DEF       = 0x01;
+const MSG_TYPE_VAR_UPDATE    = 0x02;
+const MSG_TYPE_PROGRAM_START = 0x05;
+const MSG_TYPE_PROGRAM_END   = 0x06;
+
+const VAR_TYPE_INT   = 1;
+const VAR_TYPE_FLOAT = 2;
+const VAR_TYPE_BOOL  = 3;
+
+const PERM_READ_ONLY  = 1;
+const PERM_WRITE_ONLY = 2;
+const PERM_READ_WRITE = 3;
+
+// Standard variable IDs defined in puppet.py (_STANDARD_VAR_IDS).
+// The robot never sends VAR_DEF for these, so we seed the registry directly.
+const STANDARD_VARS = {
+    20: { name: '$imu.yaw',              type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    21: { name: '$imu.roll',             type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    22: { name: '$imu.pitch',            type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    23: { name: '$imu.acc_x',            type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    24: { name: '$imu.acc_y',            type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    25: { name: '$imu.acc_z',            type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    34: { name: '$rangefinder.distance', type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    35: { name: '$reflectance.left',     type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    36: { name: '$reflectance.right',    type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+    37: { name: '$voltage',              type: VAR_TYPE_FLOAT, permissions: PERM_READ_ONLY },
+};
+
+// Custom variable IDs assigned by PuppetPassthrough.py (sequentially from FIRST_CUSTOM_VAR_ID=38).
+// VAR_DEF packets for these names exceed the default BLE ATT MTU (20 bytes) and are silently
+// truncated, so we pre-seed them here instead of relying on the VAR_DEF handshake.
+const PUPPET_PASSTHROUGH_VARS = {
+    38: { name: '$puppet.motor.0',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    39: { name: '$puppet.motor.1',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    40: { name: '$puppet.motor.2',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    41: { name: '$puppet.motor.3',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    42: { name: '$puppet.servo.0',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    43: { name: '$puppet.servo.1',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    44: { name: '$puppet.servo.2',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    45: { name: '$puppet.servo.3',             type: VAR_TYPE_FLOAT, permissions: PERM_WRITE_ONLY },
+    46: { name: '$puppet.drivetrain.stop',     type: VAR_TYPE_BOOL,  permissions: PERM_WRITE_ONLY },
+    47: { name: '$puppet.drivetrain.distance', type: VAR_TYPE_FLOAT, permissions: PERM_READ_WRITE },
+    48: { name: '$puppet.drivetrain.angle',    type: VAR_TYPE_FLOAT, permissions: PERM_READ_WRITE },
+    49: { name: '$puppet.led',                 type: VAR_TYPE_BOOL,  permissions: PERM_WRITE_ONLY },
+    50: { name: '$puppet.board_type',          type: VAR_TYPE_INT,   permissions: PERM_READ_ONLY  },
+    51: { name: '$encoder.0',                  type: VAR_TYPE_INT,   permissions: PERM_READ_ONLY  },
+    52: { name: '$encoder.1',                  type: VAR_TYPE_INT,   permissions: PERM_READ_ONLY  },
+    53: { name: '$encoder.2',                  type: VAR_TYPE_INT,   permissions: PERM_READ_ONLY  },
+    54: { name: '$encoder.3',                  type: VAR_TYPE_INT,   permissions: PERM_READ_ONLY  },
+    55: { name: '$puppet.button',              type: VAR_TYPE_BOOL,  permissions: PERM_READ_ONLY  },
+};
+
+// Variable registry: pre-seeded with all known variable IDs.
+const varRegistry = (() => {
+    const nameToInfo = {};
+    const idToName   = {};
+    for (const table of [STANDARD_VARS, PUPPET_PASSTHROUGH_VARS]) {
+        for (const [id, info] of Object.entries(table)) {
+            const numId = parseInt(id);
+            nameToInfo[info.name] = { id: numId, type: info.type, permissions: info.permissions };
+            idToName[numId] = info.name;
+        }
+    }
+    return { nameToInfo, idToName };
+})();
+
+// ============================================================
+// XPP Packet Builders
+// ============================================================
+
+function xppMessage(msgType, payload) {
+    const buf = new Uint8Array(4 + payload.length + 2);
+    buf[0] = XPP_START_1;
+    buf[1] = XPP_START_2;
+    buf[2] = msgType;
+    buf[3] = payload.length;
+    buf.set(payload, 4);
+    buf[4 + payload.length] = XPP_END_1;
+    buf[5 + payload.length] = XPP_END_2;
+    return buf;
+}
+
+function xppVarUpdate(varId, varType, value) {
+    const valBuf  = new ArrayBuffer(varType === VAR_TYPE_BOOL ? 1 : 4);
+    const valView = new DataView(valBuf);
+    if (varType === VAR_TYPE_FLOAT)     valView.setFloat32(0, value, true);
+    else if (varType === VAR_TYPE_INT)  valView.setInt32(0, Math.round(value), true);
+    else                                new Uint8Array(valBuf)[0] = value ? 1 : 0;
+
+    const valBytes = new Uint8Array(valBuf);
+    const payload  = new Uint8Array(3 + valBytes.length);
+    payload[0] = 1;        // count = 1
+    payload[1] = varId;
+    payload[2] = varType;
+    payload.set(valBytes, 3);
+    return xppMessage(MSG_TYPE_VAR_UPDATE, payload);
+}
+
+function xppProgramStart() {
+    return xppMessage(MSG_TYPE_PROGRAM_START, new Uint8Array(0));
+}
+
+// Send a named variable to the robot. No-op if the name is not yet in the registry.
+function sendVar(name, value) {
+    const info = varRegistry.nameToInfo[name];
+    if (!info) {
+        dbg('sendVar MISS (not in registry):', name);
+        return false;
+    }
+    dbg('sendVar', name, '→ id=' + info.id, 'value=' + value);
+    bleAgent.attemptSend(xppVarUpdate(info.id, info.type, value));
+    return true;
+}
+
+// Send safe default values for all PuppetPassthrough control variables.
+function sendInitialValues() {
+    dbg('sendInitialValues called');
+    for (let i = 0; i < 4; i++) sendVar('$puppet.motor.' + i, 0.0);
+    for (let i = 0; i < 4; i++) sendVar('$puppet.servo.' + i, 90.0);
+    sendVar('$puppet.drivetrain.stop',     false);
+    sendVar('$puppet.drivetrain.distance', 0.0);
+    sendVar('$puppet.drivetrain.angle',    0.0);
+    sendVar('$puppet.led',                 false);
+}
+
+// ============================================================
+// XPP Packet Parser
+// ============================================================
+
+function parseXppPackets(dataView) {
+    const bytes   = new Uint8Array(dataView.buffer);
+    const packets = [];
+    let i = 0;
+    while (i < bytes.length - 5) {
+        if (bytes[i] !== XPP_START_1 || bytes[i + 1] !== XPP_START_2) { i++; continue; }
+        const msgType    = bytes[i + 2];
+        const payloadLen = bytes[i + 3];
+        const total      = 4 + payloadLen + 2;
+        if (i + total > bytes.length) break;
+        if (bytes[i + 4 + payloadLen] !== XPP_END_1 || bytes[i + 5 + payloadLen] !== XPP_END_2) { i++; continue; }
+        packets.push({ type: msgType, payload: bytes.slice(i + 4, i + 4 + payloadLen) });
+        i += total;
+    }
+    return packets;
+}
+
+function handleVarDef(payload) {
+    if (payload.length < 4) return;
+    const nameLen = payload[0];
+    if (payload.length < 1 + nameLen + 3) return;
+    const name        = new TextDecoder().decode(payload.slice(1, 1 + nameLen));
+    const varType     = payload[1 + nameLen];
+    const permissions = payload[2 + nameLen];
+    const varId       = payload[3 + nameLen];
+    dbg('VAR_DEF received: id=' + varId, name, 'type=' + varType, 'perm=' + permissions);
+    varRegistry.nameToInfo[name] = { id: varId, type: varType, permissions };
+    varRegistry.idToName[varId]  = name;
+}
+
+function handleVarUpdate(payload) {
+    if (payload.length < 1) return;
+    const count = payload[0];
+    let offset = 1;
+    for (let i = 0; i < count; i++) {
+        if (payload.length < offset + 2) break;
+        const varId   = payload[offset];
+        const varType = payload[offset + 1];
+        offset += 2;
+        let value;
+        const view = new DataView(payload.buffer, payload.byteOffset + offset);
+        if (varType === VAR_TYPE_FLOAT) {
+            if (payload.length < offset + 4) break;
+            value = view.getFloat32(0, true); offset += 4;
+        } else if (varType === VAR_TYPE_INT) {
+            if (payload.length < offset + 4) break;
+            value = view.getInt32(0, true); offset += 4;
+        } else if (varType === VAR_TYPE_BOOL) {
+            if (payload.length < offset + 1) break;
+            value = payload[offset] !== 0; offset += 1;
+        } else { break; }
+        const name = varRegistry.idToName[varId];
+        if (name) updateTelemetry(name, value);
+    }
+}
+
+// ============================================================
+// Telemetry Display
+// ============================================================
+
+const TELEMETRY_DISPLAY = {
+    '$imu.yaw':              'telemetry-imu-yaw',
+    '$imu.roll':             'telemetry-imu-roll',
+    '$imu.pitch':            'telemetry-imu-pitch',
+    '$imu.acc_x':            'telemetry-acc-x',
+    '$imu.acc_y':            'telemetry-acc-y',
+    '$imu.acc_z':            'telemetry-acc-z',
+    '$encoder.0':            'telemetry-enc-0',
+    '$encoder.1':            'telemetry-enc-1',
+    '$encoder.2':            'telemetry-enc-2',
+    '$encoder.3':            'telemetry-enc-3',
+    '$rangefinder.distance': 'telemetry-sonar',
+    '$reflectance.left':     'telemetry-refl-left',
+    '$reflectance.right':    'telemetry-refl-right',
+    '$voltage':              'telemetry-voltage',
+};
+
+const BOARD_TYPE_NAMES = ['XRP Beta', 'XRP', 'NanoXRP'];
+
+function updateTelemetry(name, value) {
+    if (name === '$puppet.board_type') {
+        const el = document.getElementById('telemetry-board-type');
+        if (el) el.textContent = BOARD_TYPE_NAMES[value] ?? 'Unknown';
+        return;
+    }
+    if (name === '$puppet.button') {
+        const el = document.getElementById('telemetry-button');
+        if (el) {
+            el.textContent = value ? 'PRESSED' : 'open';
+            el.style.color = value ? '#ff6b6b' : 'white';
+        }
+        return;
+    }
+    const elId = TELEMETRY_DISPLAY[name];
+    if (elId) {
+        const el = document.getElementById(elId);
+        if (el) el.textContent = Number.isInteger(value) ? String(value) : value.toFixed(2);
+    }
+    if (name === '$voltage') {
+        const badge = document.getElementById('telemetry');
+        if (badge) badge.textContent = value.toFixed(1) + ' V';
+    }
+}
+
+// ============================================================
+// BLE Agent
+// ============================================================
+
 let bleAgent = createBleAgent();
 
-let toggleDebug = document.getElementById('toggle-debug-mode');
-
-// State for the debug mode toggle, defaults to off.
-let isDebugModeEnabled = false;
-
-// --------------------------- state management ------------------------------------ //
-
-
 document.addEventListener('DOMContentLoaded', function () {
-    const refreshButton = document.getElementById('refresh-button');
-    const reloadPage = () => window.location.reload();
-
-    refreshButton.addEventListener('click', reloadPage);
-    refreshButton.addEventListener('touchend', reloadPage);
-
-    updateToggle(toggleDebug, isDebugModeEnabled, false);
-
-    const debugToggleHandler = () => isDebugModeEnabled = updateToggle(toggleDebug, isDebugModeEnabled, true);
-
-    toggleDebug.addEventListener('mousedown', debugToggleHandler);
-    toggleDebug.addEventListener('touchstart', debugToggleHandler);
-
-    // If the window loses focus, send a drivetrain stop command for safety.
+    // Safety stop when the browser tab loses focus
     window.addEventListener('blur', () => {
-        if (bleAgent.isConnected()) {
-            bleAgent.attemptSend(createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET));
-        }
+        if (bleAgent.isConnected()) sendVar('$puppet.drivetrain.stop', true);
     });
 
     setupAxisSliders();
-    setupPuppetProtocolButtons();
+    setupMotorSliders();
+    setupMotorButtons();
     setupDrivetrainButtons();
+    setupLedButton();
 });
 
-function updateToggle(element, currentState, isToggling) {
-    const newState = isToggling ? !currentState : currentState;
-    if (newState) {
-        element.style.backgroundColor = 'var(--alf-green)';
-        element.firstElementChild.style.transform = 'translateX(2vw)';
-    } else {
-        element.style.backgroundColor = 'var(--button-default)';
-        element.firstElementChild.style.transform = 'none';
-    }
-    return newState;
-}
+// ============================================================
+// Control Handlers
+// ============================================================
 
 function setupAxisSliders() {
-    // Axis state, initialized to the neutral position (90 degrees)
     const axisValues = [90, 90, 90, 90];
 
     for (let i = 0; i < 4; i++) {
-        const sliderBar = document.getElementById(`bar${i}`);
-        const axisValueDisplay = document.getElementById(`axisValue${i}`);
+        const sliderBar        = document.getElementById('bar' + i);
+        const axisValueDisplay = document.getElementById('axisValue' + i);
+
+        const indicator = document.createElement('div');
+        indicator.className  = 'slider-indicator';
+        indicator.style.left = '50%';
+        sliderBar.appendChild(indicator);
 
         const startDrag = (event) => {
             event.preventDefault();
             document.addEventListener('mousemove', onDrag);
             document.addEventListener('touchmove', onDrag, { passive: false });
-            document.addEventListener('mouseup', endDrag);
-            document.addEventListener('touchend', endDrag);
+            document.addEventListener('mouseup',   endDrag);
+            document.addEventListener('touchend',  endDrag);
         };
 
         const onDrag = (event) => {
             event.preventDefault();
-            const rect = sliderBar.getBoundingClientRect();
-            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-            const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+            const rect       = sliderBar.getBoundingClientRect();
+            const clientX    = event.touches ? event.touches[0].clientX : event.clientX;
+            const x          = Math.max(0, Math.min(clientX - rect.left, rect.width));
             const percentage = x / rect.width;
-
-            // Map percentage (0-1) to angle (0-180) for display and for the BLE packet
-            const angle = Math.round(percentage * 180);
+            const angle      = Math.round(percentage * 180);
             axisValueDisplay.textContent = angle;
-            axisValues[i] = angle;
-
-            // Update the visual indicator
-            const indicator = sliderBar.querySelector('.slider-indicator');
-            if (indicator) {
-                indicator.style.left = `${percentage * 100}%`;
-            }
+            axisValues[i]                = angle;
+            indicator.style.left         = `${percentage * 100}%`;
         };
 
         const endDrag = () => {
-            // Send packet on drag end
-            const packet = createPuppetPacket(FUNCTION_GROUPS.SERVO, 0x00, FUNCTION_TYPES.SET, [i, axisValues[i]]);
-            bleAgent.attemptSend(packet);
-
+            sendVar('$puppet.servo.' + i, axisValues[i]);
             document.removeEventListener('mousemove', onDrag);
             document.removeEventListener('touchmove', onDrag);
-            document.removeEventListener('mouseup', endDrag);
-            document.removeEventListener('touchend', endDrag);
+            document.removeEventListener('mouseup',   endDrag);
+            document.removeEventListener('touchend',  endDrag);
         };
 
-        sliderBar.addEventListener('mousedown', startDrag);
+        sliderBar.addEventListener('mousedown',  startDrag);
         sliderBar.addEventListener('touchstart', startDrag, { passive: false });
-
-        // Create and add the visual indicator
-        const indicator = document.createElement('div');
-        indicator.className = 'slider-indicator';
-        sliderBar.appendChild(indicator);
-        
-        // Set initial position (90 degrees is 50%)
-        indicator.style.left = '50%';
     }
 }
 
-// ----------------------------------------- main --------------------------------------- //
+function setupMotorSliders() {
+    for (let i = 0; i < 4; i++) {
+        const sliderBar    = document.getElementById('mbar' + i);
+        const valueDisplay = document.getElementById('motorValue' + i);
 
-// ----------------------------------------- Puppet Protocol (0x57) --------------------------------------- //
+        const indicator      = document.createElement('div');
+        indicator.className  = 'slider-indicator';
+        indicator.style.left = '50%';
+        sliderBar.appendChild(indicator);
 
-const FUNCTION_GROUPS = {
-    ROBOT_BOARD: 0x03,
-    MOTOR: 0x12,
-    DRIVETRAIN: 0x05,
-    SERVO: 0x13,
-    SENSOR: 0x07,
-};
+        const startDrag = (event) => {
+            event.preventDefault();
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('touchmove', onDrag, { passive: false });
+            document.addEventListener('mouseup',   endDrag);
+            document.addEventListener('touchend',  endDrag);
+        };
 
-const FUNCTION_TYPES = {
-    SET: 0x00,
-    REQUEST: 0x01,
-    DATA: 0x02,
-};
+        const SNAP_THRESHOLD = 0.1;
+        const onDrag = (event) => {
+            event.preventDefault();
+            const rect    = sliderBar.getBoundingClientRect();
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const x       = Math.max(0, Math.min(clientX - rect.left, rect.width));
+            const pct     = x / rect.width;
+            const raw     = (pct * 2 - 1);
+            const effort  = Math.abs(raw) < SNAP_THRESHOLD ? 0 : Math.round(raw * 100) / 100;
+            const dispPct = effort === 0 ? 50 : pct * 100;
+            valueDisplay.textContent = effort.toFixed(2);
+            indicator.style.left     = `${dispPct}%`;
+            sendVar('$puppet.motor.' + i, effort);
+        };
 
-/**
- * Creates a Puppet Protocol (0x57) packet.
- * @param {number} group - The function group (e.g., FUNCTION_GROUPS.MOTOR).
- * @param {number} func - The function within the group.
- * @param {number} type - The function type (e.g., FUNCTION_TYPES.SET).
- * @param {Array<number|boolean>} data - An array of data to be serialized (bytes, floats, booleans).
- * @returns {Uint8Array} The constructed packet.
- */
-function createPuppetPacket(group, func, type, data = []) {
-    const buffer = new ArrayBuffer(20);
-    const view = new DataView(buffer);
+        const endDrag = () => {
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('touchmove', onDrag);
+            document.removeEventListener('mouseup',   endDrag);
+            document.removeEventListener('touchend',  endDrag);
+        };
 
-    view.setUint8(0, 0x57); // Packet Type
-    view.setUint8(1, group);
-    view.setUint8(2, func);
-    view.setUint8(3, type);
-
-    let offset = 4;
-    data.forEach(value => {
-        if (typeof value === 'number' && Number.isInteger(value)) {
-            // Assume it's a byte if it's an integer
-            view.setUint8(offset, value);
-            offset += 1;
-        } else if (typeof value === 'number') {
-            // Assume it's a float
-            view.setFloat32(offset, value, true); // true for little-endian
-            offset += 4;
-        } else if (typeof value === 'boolean') {
-            view.setUint8(offset, value ? 1 : 0);
-            offset += 1;
-        }
-    });
-
-    return new Uint8Array(buffer);
+        sliderBar.addEventListener('mousedown',  startDrag);
+        sliderBar.addEventListener('touchstart', startDrag, { passive: false });
+    }
 }
 
-function setupPuppetProtocolButtons() {
-    const topContainer = document.getElementById('desktop-axis-top');
-    const motorButtons = topContainer.querySelectorAll('button:not(#desktop-axis-stop)');
-    const motorInputs = topContainer.querySelectorAll('input[type="text"]');
-
-    // Motor Set Effort Buttons
-    motorButtons.forEach((button, index) => {
-        button.addEventListener('click', () => {
-            const effort = parseFloat(motorInputs[index].value) || 0.0;
-            const packet = createPuppetPacket(FUNCTION_GROUPS.MOTOR, 0x01, FUNCTION_TYPES.SET, [index, effort]);
-            bleAgent.attemptSend(packet);
-        });
-    });
-
-    // Drivetrain Stop Button
+function setupMotorButtons() {
     document.getElementById('desktop-axis-stop').addEventListener('click', () => {
-        const packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x00, FUNCTION_TYPES.SET);
-        bleAgent.attemptSend(packet);
+        sendVar('$puppet.drivetrain.stop', true);
+        for (let i = 0; i < 4; i++) {
+            sendVar('$puppet.motor.' + i, 0.0);
+            document.getElementById('motorValue' + i).textContent = '0.00';
+            const bar = document.getElementById('mbar' + i);
+            const indicator = bar.querySelector('.slider-indicator');
+            if (indicator) indicator.style.left = '50%';
+        }
     });
+}
 
-    const bottomContainer = document.getElementById('desktop-axis-bottom');
-    const sensorButtons = bottomContainer.querySelectorAll('button');
-
-    // Sensor Request Buttons
-    // [Read Sonar, Read Reflectance, Read Magnetometer, Read Accelerometer]
-    const sensorFunctions = [0x00, 0x01, 0x02, 0x03];
-    sensorButtons.forEach((button, index) => {
-        button.addEventListener('click', () => {
-            let data = [];
-            // Reflectance requires a sensor number, let's default to 0 for this example
-            if (sensorFunctions[index] === 0x01) {
-                data.push(0); // Requesting data from reflectance sensor 0
-            }
-            const packet = createPuppetPacket(FUNCTION_GROUPS.SENSOR, sensorFunctions[index], FUNCTION_TYPES.REQUEST, data);
-            bleAgent.attemptSend(packet);
-        });
+function setupLedButton() {
+    let ledOn = false;
+    const btn = document.getElementById('led-button');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        ledOn = !ledOn;
+        sendVar('$puppet.led', ledOn);
+        btn.textContent = ledOn ? 'LED ON' : 'LED OFF';
+        btn.style.backgroundColor = ledOn ? '#f39c12' : '';
     });
 }
 
 function setupDrivetrainButtons() {
-    const container = document.getElementById('desktop-button');
-    const buttons = container.querySelectorAll('button');
-
-    buttons.forEach(button => {
+    document.getElementById('desktop-button').querySelectorAll('button').forEach(button => {
         button.addEventListener('click', () => {
-            const text = button.innerHTML;
+            const text  = button.innerHTML;
             const value = parseFloat(text);
-
             if (isNaN(value)) return;
-
-            let packet;
-            const maxEffort = 0.8; // Default max effort
-            const timeout = 5.0;   // Default timeout in seconds
-
             if (text.includes('cm')) {
-                // Drivetrain Straight: [0x05][0x04]
-                // Data: (target distance CM, FLOAT)(max effort, FLOAT)(timeout FLOAT)
-                packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x04, FUNCTION_TYPES.SET, [value, maxEffort, timeout]);
+                sendVar('$puppet.drivetrain.distance', value);
             } else if (text.includes('°')) {
-                // Drivetrain Turn: [0x05][0x05]
-                // Data: (target angle DEG, FLOAT)(max effort, FLOAT)(timeout FLOAT)
-                packet = createPuppetPacket(FUNCTION_GROUPS.DRIVETRAIN, 0x05, FUNCTION_TYPES.SET, [value, maxEffort, timeout]);
+                sendVar('$puppet.drivetrain.angle', value);
             }
-
-            if (packet) bleAgent.attemptSend(packet);
         });
     });
 }
-// -------------------------------------------- bluetooth --------------------------------------- //
+
+// ============================================================
+// BLE Agent Implementation
+// ============================================================
 
 function createBleAgent() {
-    let buttonBLE = document.getElementById('ble-button')
-    let statusBLE = document.getElementById('ble-status')
-    let telemetryDisplay = document.getElementById('telemetry')
-    let terminalLog = document.getElementById("terminal-log");
-    let terminalClearButton = document.getElementById("terminal-clear-button");
-    let terminalLockButton = document.getElementById("terminal-lock-button");
-
+    const buttonBLE = document.getElementById('ble-button');
+    const statusBLE = document.getElementById('ble-status');
 
     const SERVICE_UUID_UART = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-    // The peripheral's TX becomes our RX and vice-versa.
-    const CHARACTERISTIC_UUID_DATA_RX = '92ae6088-f24d-4360-b1b1-a432a8ed36fe'; // Notifications
-    const CHARACTERISTIC_UUID_DATA_TX = '92ae6088-f24d-4360-b1b1-a432a8ed36ff'; // Write
+    const CHAR_DATA_RX = '92ae6088-f24d-4360-b1b1-a432a8ed36fe'; // notify  (robot → browser)
+    const CHAR_DATA_TX = '92ae6088-f24d-4360-b1b1-a432a8ed36ff'; // write   (browser → robot)
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-    if (isMobile){
+    if (isMobile) {
         buttonBLE.ontouchend = updateBLE;
-        terminalClearButton.ontouchend = clearTerminal;
-        terminalLockButton.ontouchend = toggleTerminalLock;
     } else {
         buttonBLE.onclick = updateBLE;
-        terminalClearButton.onclick = clearTerminal;
-        terminalLockButton.onclick = toggleTerminalLock;
-    }
-
-    function displayBleStatus(status, color) {
-        statusBLE.innerHTML = status;
-        console.log(status)
-        statusBLE.style.backgroundColor = color;
     }
 
     let device = null;
-    let server;
-    let service;
     let characteristic_data_tx;
     let characteristic_data_rx;
-    let isConnectedBLE = false;
-    let isConnecting = false;
+    let isConnectedBLE     = false;
+    let isConnecting       = false;
     let bleUpdateInProgress = false;
-    let characteristicsSubscribed = false;
+    let bleWriteQueue      = Promise.resolve();
+
+    function displayBleStatus(status, color) {
+        statusBLE.innerHTML             = status;
+        statusBLE.style.backgroundColor = color;
+    }
 
     async function updateBLE() {
-        if (bleUpdateInProgress) return
+        if (bleUpdateInProgress) return;
         bleUpdateInProgress = true;
         try {
             if (!isConnectedBLE) await connectBLE();
-            else await disconnectBLE();
+            else                  await disconnectBLE();
         } finally {
             bleUpdateInProgress = false;
         }
-        
     }
 
     async function connectBLE() {
         if (isConnecting || isConnectedBLE) return;
         isConnecting = true;
         try {
-            if (device == null){
+            if (device == null) {
                 displayBleStatus('Scanning...', 'black');
-                device = await navigator.bluetooth.requestDevice({ 
+                device = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: 'XRP' }],
-                    optionalServices: [SERVICE_UUID_UART] // Grant access to the service
+                    optionalServices: [SERVICE_UUID_UART]
                 });
                 device.addEventListener('gattserverdisconnected', robotDisconnect);
             } else {
-                displayBleStatus(`Reconnecting to <br> ${device.name}`, 'black');
+                displayBleStatus(`Reconnecting to <br>${device.name}`, 'black');
             }
 
-            server = await device.gatt.connect();
-            service = await server.getPrimaryService(SERVICE_UUID_UART);
-            
-            // Get Data TX Characteristic for sending packets
-            characteristic_data_tx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_TX);
+            const server  = await device.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID_UART);
+            characteristic_data_tx = await service.getCharacteristic(CHAR_DATA_TX);
 
-            // Get Data RX Characteristic and subscribe to notifications
             try {
-                characteristic_data_rx = await service.getCharacteristic(CHARACTERISTIC_UUID_DATA_RX);
+                characteristic_data_rx = await service.getCharacteristic(CHAR_DATA_RX);
                 await characteristic_data_rx.startNotifications();
                 characteristic_data_rx.addEventListener('characteristicvaluechanged', handleIncomingData);
-            } catch (error) {
-                console.log("Data RX characteristic not available.", error);
+            } catch (e) {
+                console.log('Data RX characteristic not available:', e);
             }
-
-            characteristicsSubscribed = true;
 
             isConnectedBLE = true;
-            isConnecting = false;
+            isConnecting   = false;
             buttonBLE.innerHTML = '❌';
-            displayBleStatus(`Connected to <br> ${device.name}`, '#4dae50'); //green
+            displayBleStatus(`Connected to <br>${device.name}`, '#4dae50');
+
+            // Tell the robot a browser is connected; robot will send back PROGRAM_START
+            await sendPacketBLE(xppProgramStart());
+            // Registry is pre-seeded, so send initial values immediately
+            sendInitialValues();
 
         } catch (error) {
-            if (error.name === 'NotFoundError') {
-                displayBleStatus('No Device Selected', '#eb5b5b');
-            } else if (error.name === 'SecurityError') {
-                displayBleStatus('Security error', '#eb5b5b');
-            } else {
-                console.log( error);
-                displayBleStatus('Connection failed', '#eb5b5b');
-            }
+            if      (error.name === 'NotFoundError') displayBleStatus('No Device Selected', '#eb5b5b');
+            else if (error.name === 'SecurityError') displayBleStatus('Security error', '#eb5b5b');
+            else { console.log(error); displayBleStatus('Connection failed', '#eb5b5b'); }
         } finally {
             isConnecting = false;
         }
     }
 
-    let terminalLocked = false;
-
-    function handleIncomingData(event){
-
-        if (terminalLocked) return;
-
-        const view = event.target.value; // DataView of the characteristic's value
-
-        if (isDebugModeEnabled) {
-            const byteArray = new Uint8Array(view.buffer);
-            const hexString = Array.from(byteArray).map(b => b.toString(16).padStart(2, '0')).join(' ').toUpperCase();
-            appendToTerminal(`IN: [ ${hexString} ]`);
-        }
-
-        const packetType = view.getUint8(0);
-        let outputString = '';
-
-        if (packetType === 0x57) { // Puppet Protocol Data
-            const group = view.getUint8(1);
-            const func = view.getUint8(2);
-            const type = view.getUint8(3);
-
-            if (type === FUNCTION_TYPES.DATA) {
-                outputString = `DATA: `;
-                if (group === FUNCTION_GROUPS.SENSOR && func === 0x00) { // Sonar
-                    const distance = view.getFloat32(4, true).toFixed(2);
-                    outputString += `Sonar Distance: ${distance} cm`;
-                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x01) { // Reflectance
-                    const sensorNum = view.getUint8(4); const value = view.getFloat32(5, true).toFixed(2);
-                    outputString += `Reflectance[${sensorNum}]: ${value}`; 
-                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x02) { // Magnetometer
-                    const yaw = view.getFloat32(4, true).toFixed(2); const roll = view.getFloat32(8, true).toFixed(2); const pitch = view.getFloat32(12, true).toFixed(2);
-                    outputString += `Mag: Y=${yaw}, R=${roll}, P=${pitch}`; 
-                } else if (group === FUNCTION_GROUPS.SENSOR && func === 0x03) { // Accelerometer
-                    const x = view.getFloat32(4, true).toFixed(2); const y = view.getFloat32(8, true).toFixed(2); const z = view.getFloat32(12, true).toFixed(2);
-                    outputString += `Accel: X=${x}, Y=${y}, Z=${z}`; 
-                } else {
-                    // Generic data packet display
-                    outputString = `DATA: G=${group}, F=${func}, Data=[`;
-                    for (let i = 4; i < view.byteLength; i++) { outputString += ` ${view.getUint8(i)}`; }
-                    outputString += " ]";
-                }
-            }
-        }
-
-        if (outputString) {
-            appendToTerminal(outputString);
-        }
-    }
-
-    function appendToTerminal(text) {
-        const lines = terminalLog.innerHTML.split('<br>').filter(line => line.trim() !== '');
-        lines.push(text);
-        while (lines.length > 7) lines.shift();
-        terminalLog.innerHTML = lines.join('<br>');
-    }
-
-    function clearTerminal() {
-        terminalLog.innerHTML = "";
-    }
-    
-    function toggleTerminalLock() {
-        if(terminalLocked){
-            terminalLocked = false;
-            terminalLockButton.innerHTML = "🔓";
-        } else{
-            terminalLocked = true;
-            terminalLockButton.innerHTML = "🔒";
+    function handleIncomingData(event) {
+        const view  = event.target.value;
+        const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+        dbg('BLE notify', bytes.length + 'B:', hex(bytes));
+        for (const pkt of parseXppPackets(view)) {
+            if      (pkt.type === MSG_TYPE_VAR_DEF)       handleVarDef(pkt.payload);
+            else if (pkt.type === MSG_TYPE_VAR_UPDATE)    handleVarUpdate(pkt.payload);
+            else if (pkt.type === MSG_TYPE_PROGRAM_START) { dbg('PROGRAM_START from robot → sendInitialValues'); sendInitialValues(); }
         }
     }
 
     async function disconnectBLE() {
         displayBleStatus('Disconnecting', 'gray');
         try {
-            if (characteristicsSubscribed && characteristic_data_rx) {
+            if (characteristic_data_rx) {
                 try {
                     await characteristic_data_rx.stopNotifications();
                     characteristic_data_rx.removeEventListener('characteristicvaluechanged', handleIncomingData);
-                } catch (e) {
-                    console.log("Error unsubscribing from notifications:", e);
-                }
+                } catch (e) { console.log(e); }
             }
-            if (device && device.gatt.connected) {
-                await device.gatt.disconnect();
-            }
+            if (device && device.gatt.connected) await device.gatt.disconnect();
             displayBleStatus('Not Connected', 'black');
-            isConnectedBLE = false;
-            characteristicsSubscribed = false;
+            isConnectedBLE      = false;
             buttonBLE.innerHTML = '🔗';
-
         } catch (error) {
-            displayBleStatus("Error", '#eb5b5b');
-            console.error('Error:', error);
+            displayBleStatus('Error', '#eb5b5b');
+            console.error(error);
         }
     }
 
-    function robotDisconnect(event) {
+    function robotDisconnect() {
         displayBleStatus('Not Connected', 'black');
-        if (isConnectedBLE) {
-            isConnectedBLE = false;
-            // Optional: try to reconnect automatically
-            // displayBleStatus('Reconnecting...', 'black');
-            // setTimeout(connectBLE, 1000); 
-        }
+        isConnectedBLE = false;
     }
-
-    /**
-     *  bleQueue - If we haven't come back from the ble.writeValue then the GATT is still busy and we will miss items that are being sent
-     * This can be seen if you type very fast in the Shell 
-     */
-    let bleWriteQueue = Promise.resolve();
 
     async function sendPacketBLE(byteArray) {
-        if (!isConnectedBLE || !characteristic_data_tx) {
-            return;
-        }
-
-        if (isDebugModeEnabled) {
-            // Create a hex string representation of the outgoing packet
-            const hexString = Array.from(new Uint8Array(byteArray)).map(b => b.toString(16).padStart(2, '0')).join(' ').toUpperCase();
-            appendToTerminal(`OUT: [ ${hexString} ]`);
-        }
-
+        if (!isConnectedBLE || !characteristic_data_tx) return;
+        const arr = new Uint8Array(byteArray);
+        dbg('BLE write', arr.length + 'B:', hex(arr));
         bleWriteQueue = bleWriteQueue.then(async () => {
             try {
-                // Using writeValueWithResponse is more reliable for NUS, but writeValueWithoutResponse is faster.
-                // Your Python code uses NOTIFY, so the client should use writeValueWithoutResponse.
-                await characteristic_data_tx.writeValueWithoutResponse(new Uint8Array(byteArray));
-            } catch (error) {
-                console.error('BLE write failed:', error);
-            }
+                await characteristic_data_tx.writeValueWithResponse(arr);
+            } catch (e) { console.error('BLE write failed:', e); }
         });
     }
 
     return {
         attemptSend: sendPacketBLE,
-        isConnected: () => isConnectedBLE
+        isConnected: () => isConnectedBLE,
     };
 }
